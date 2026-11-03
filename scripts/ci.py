@@ -166,6 +166,11 @@ def native():
         env['CPLUS_INCLUDE_PATH'] = str(include)
     source = ROOT / 'sources/native'
     env['CONAN_HOME'] = str(source / 'conan/cache')
+    if target.startswith('macos-') and os.environ.get('YSM_DIAGNOSTIC_SYSTEM_NEW') == '1':
+        allocator = source / 'modules/core/src/allocator.cc'
+        if allocator.read_text().strip() != '#include <mimalloc-new-delete.h>':
+            raise RuntimeError('Allocator source changed; review diagnostic change')
+        allocator.write_text('// Diagnostic: use the system C++ new/delete operators.\n')
     if target.startswith('macos-'):
         mac_target = source / 'conan/cmake/targets/macos-arm64.cmake'
         template = mac_target.read_text()
