@@ -1,4 +1,22 @@
 allprojects {
+    tasks.matching { it.name == 'verifyBuiltinModelIndex' }.configureEach {
+        doFirst {
+            toolClasspath.files.findAll { it.isFile() && it.name.endsWith('.jar') }.each { file ->
+                new java.util.jar.JarFile(file, true).withCloseable { jar ->
+                    def entry = jar.getJarEntry('net/minecraftforge/common/extensions/IForgeEntity.class')
+                    if (entry != null) {
+                        println("Forge verification classpath: ${file}")
+                        try {
+                            jar.getInputStream(entry).withCloseable { it.bytes }
+                            println('Forge class signature check: passed')
+                        } catch (SecurityException ex) {
+                            println("Forge class signature check: ${ex.message}")
+                        }
+                    }
+                }
+            }
+        }
+    }
     tasks.register('ciSmokeDependencies', Copy) {
         from configurations.compileClasspath.filter {
             (it.name.startsWith('jna-') && !it.name.startsWith('jna-platform-')) ||
