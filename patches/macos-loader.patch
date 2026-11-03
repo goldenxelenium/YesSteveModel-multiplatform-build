@@ -1,0 +1,37 @@
+--- a/src/main/java/com/elfmcys/ysm/util/NativeLibUtil.java
++++ b/src/main/java/com/elfmcys/ysm/util/NativeLibUtil.java
+@@ -236,6 +236,14 @@
+             return detectWindowsConfig(modVersion, isX64);
+         } else if (SystemUtils.IS_OS_LINUX) {
+             return detectLinuxConfig(modVersion, isX64, isAArch64);
++        } else if (SystemUtils.IS_OS_MAC_OSX) {
++            String library = BundledMacLibrary.fileName(SystemUtils.OS_NAME, SystemUtils.OS_ARCH);
++            if (library == null) {
++                setUnsupportedPlatformMsg(SystemUtils.OS_NAME + " " + SystemUtils.OS_ARCH);
++                return null;
++            }
++            return new PlatformConfig(library, "libysm-core-" + modVersion + ".dylib",
++                Path.of(System.getProperty("user.home"), "Library", "Caches", "ysm", "unstable"));
+         } else {
+             setUnsupportedPlatformMsg(SystemUtils.OS_NAME);
+             return null;
+--- /dev/null
++++ b/src/main/java/com/elfmcys/ysm/util/BundledMacLibrary.java
+@@ -0,0 +1,17 @@
++package com.elfmcys.ysm.util;
++
++import java.util.Locale;
++
++/** Bundled macOS library selection, shared by the loader and the headless CI smoke check. */
++public final class BundledMacLibrary {
++    private BundledMacLibrary() {}
++
++    public static String fileName(String osName, String architecture) {
++        String os = osName.toLowerCase(Locale.ROOT);
++        String arch = architecture.toLowerCase(Locale.ROOT);
++        if (!(os.contains("mac") || os.contains("darwin"))) return null;
++        if (arch.equals("aarch64") || arch.equals("arm64")) return "libysm.dylib";
++        if (arch.equals("amd64") || arch.equals("x86_64")) return "libysm-x86_64.dylib";
++        return null;
++    }
++}

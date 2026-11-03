@@ -1,0 +1,218 @@
+name: Build and release Linux + macOS mod
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  schedule:
+    - cron: '43 4 * * *'
+  workflow_dispatch:
+    inputs:
+      source_mode:
+        description: Source commits to build
+        type: choice
+        options: [pinned, latest]
+        default: pinned
+      publish:
+        description: Publish a development prerelease after all checks pass
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: multiplatform-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    outputs:
+      build: ${{ steps.sources.outputs.build }}
+      java: ${{ steps.sources.outputs.java }}
+      native: ${{ steps.sources.outputs.native }}
+      mdspan: ${{ steps.sources.outputs.mdspan }}
+      tag: ${{ steps.sources.outputs.tag }}
+      publish: ${{ steps.sources.outputs.publish }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Resolve commits and skip already published daily builds
+        id: sources
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_MODE: ${{ inputs.source_mode || 'pinned' }}
+          PUBLISH: ${{ inputs.publish || false }}
+        run: |
+          python3 -m unittest discover -s tests -v
+          python3 scripts/ci.py resolve
+
+  native:
+    needs: resolve
+    if: needs.resolve.outputs.build == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: linux-amd64
+          - runner: macos-15
+            target: macos-arm64
+          - runner: macos-15-intel
+            target: macos-amd64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: YesSteveModel/YesSteveModel
+          ref: ${{ needs.resolve.outputs.java }}
+          path: sources/java
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: YesSteveModel/YesSteveModel-Native
+          ref: ${{ needs.resolve.outputs.native }}
+          path: sources/native
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: kokkos/mdspan
+          ref: ${{ needs.resolve.outputs.mdspan }}
+          path: sources/mdspan
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Linux build prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo add-apt-repository --yes ppa:git-core/ppa
+          sudo apt-get update
+          sudo apt-get install --yes git gcc-13 g++-13 make p7zip-full
+      - name: macOS build prerequisites
+        if: runner.os == 'macOS'
+        run: |
+          brew install git
+          echo "$(brew --prefix git)/bin" >> "$GITHUB_PATH"
+      - run: python3 -m pip install -r requirements-build.txt
+      - name: Build, inspect and load native library
+        env:
+          TARGET: ${{ matrix.target }}
+          EXPECTED_JAVA_SHA: ${{ needs.resolve.outputs.java }}
+          EXPECTED_NATIVE_SHA: ${{ needs.resolve.outputs.native }}
+        run: python3 scripts/ci.py native
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-${{ matrix.target }}
+          path: artifacts/${{ matrix.target }}/
+          if-no-files-found: error
+          retention-days: 7
+
+  package:
+    needs: [resolve, native]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: YesSteveModel/YesSteveModel
+          ref: ${{ needs.resolve.outputs.java }}
+          path: sources/java
+          persist-credentials: false
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          pattern: native-*
+          path: artifacts
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: |
+            17.0.21+9
+            21.0.13+9
+      - name: Patch macOS loader, embed both libraries and verify final JAR
+        env:
+          EXPECTED_JAVA_SHA: ${{ needs.resolve.outputs.java }}
+          EXPECTED_NATIVE_SHA: ${{ needs.resolve.outputs.native }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+        run: python3 scripts/ci.py package
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: multiplatform-release
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+  smoke:
+    needs: package
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: linux-amd64
+          - runner: macos-15
+            target: macos-arm64
+          - runner: macos-15-intel
+            target: macos-amd64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: multiplatform-release
+          path: dist
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '17.0.21+9'
+      - name: Load embedded native library and initialize JNI from the final mod
+        env:
+          TARGET: ${{ matrix.target }}
+        run: python3 scripts/ci.py smoke
+
+  release:
+    needs: [resolve, package, smoke]
+    if: needs.resolve.outputs.publish == 'true' && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: release-${{ needs.resolve.outputs.tag }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: multiplatform-release
+          path: dist
+      - name: Publish completed development build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          BUILD_COMMIT: ${{ github.sha }}
+        shell: bash
+        run: |
+          if gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft > release-draft.txt; then
+            test "$(cat release-draft.txt)" = true
+            gh release upload "$RELEASE_TAG" dist/*.jar dist/*.zip dist/SHA256SUMS --clobber
+          else
+            gh release create "$RELEASE_TAG" dist/*.jar dist/*.zip dist/SHA256SUMS \
+              --target "$BUILD_COMMIT" --draft --prerelease --latest=false \
+              --title "YSM Linux amd64 + macOS arm64 + Intel ($RELEASE_TAG)" \
+              --notes-file dist/release-notes.md
+          fi
+          gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false \
+            --notes-file dist/release-notes.md

@@ -1,0 +1,10 @@
+allprojects {
+    tasks.register('ciSmokeDependencies', Copy) {
+        from configurations.compileClasspath.filter {
+            (it.name.startsWith('jna-') && !it.name.startsWith('jna-platform-')) ||
+                it.name.startsWith('log4j-api-') || it.name.startsWith('joml-') ||
+                it.name.startsWith('fastutil-')
+        }
+        into System.getenv('CI_SMOKE_DIR')
+    }
+}
