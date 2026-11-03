@@ -1,20 +1,33 @@
 allprojects {
     tasks.matching { it.name == 'verifyBuiltinModelIndex' }.configureEach {
         doFirst {
-            toolClasspath.files.findAll { it.isFile() && it.name.endsWith('.jar') }.each { file ->
-                new java.util.jar.JarFile(file, true).withCloseable { jar ->
-                    def entry = jar.getJarEntry('net/minecraftforge/common/extensions/IForgeEntity.class')
-                    if (entry != null) {
-                        println("Forge verification classpath: ${file}")
-                        try {
-                            jar.getInputStream(entry).withCloseable { it.bytes }
-                            println('Forge class signature check: passed')
-                        } catch (SecurityException ex) {
-                            println("Forge class signature check: ${ex.message}")
+            def generated = layout.buildDirectory.dir('moddev/artifacts').get().asFile.toPath().toAbsolutePath().normalize()
+            def classpath = toolClasspath.files.collect { file ->
+                def path = file.toPath().toAbsolutePath().normalize()
+                if (!path.startsWith(generated) || !file.name.startsWith('forge-') || !file.name.endsWith('.jar')) {
+                    return file
+                }
+                def copy = layout.buildDirectory.file("ci/unsigned-${file.name}").get().asFile
+                copy.parentFile.mkdirs()
+                new java.util.zip.ZipFile(file).withCloseable { zip ->
+                    new java.util.zip.ZipOutputStream(new FileOutputStream(copy)).withCloseable { out ->
+                        zip.entries().each { entry ->
+                            def name = entry.name.toUpperCase(Locale.ROOT)
+                            if (!(name ==~ /META-INF\/[^\/]+\.(SF|RSA|DSA|EC)/) &&
+                                !(name ==~ /META-INF\/SIG-[^\/]+/)) {
+                                out.putNextEntry(new java.util.zip.ZipEntry(entry.name))
+                                if (!entry.directory) {
+                                    zip.getInputStream(entry).withCloseable { input -> input.transferTo(out) }
+                                }
+                                out.closeEntry()
+                            }
                         }
                     }
                 }
+                println("Using unsigned copy of generated Forge development JAR: ${file}")
+                copy
             }
+            toolClasspath.setFrom(classpath)
         }
     }
     tasks.register('ciSmokeDependencies', Copy) {
