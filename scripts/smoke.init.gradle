@@ -1,26 +1,29 @@
 allprojects {
     afterEvaluate {
         if (tasks.findByName('verifyBuiltinModelIndex') == null) return
-        def generated = layout.buildDirectory.dir('moddev/artifacts').get().asFile.toPath().toAbsolutePath().normalize()
+        def generated = layout.buildDirectory.dir('moddev/artifacts').get().asFile
+        def unsignedForge = tasks.register('ciUnsignedForge', Zip) {
+            dependsOn tasks.named('createMinecraftArtifacts')
+            from {
+                def matches = fileTree(generated).matching { include 'forge-*.jar' }.files
+                if (matches.size() != 1) throw new GradleException("Expected one generated Forge JAR, got: ${matches}")
+                zipTree(matches.first())
+            }
+            exclude 'META-INF/*.SF', 'META-INF/*.RSA', 'META-INF/*.DSA', 'META-INF/*.EC', 'META-INF/SIG-*'
+            destinationDirectory = layout.buildDirectory.dir('ci')
+            archiveFileName = 'forge-unsigned.jar'
+        }
         tasks.named('verifyBuiltinModelIndex').configure { task ->
-            def original = task.toolClasspath.files.toList()
-            def forge = original.findAll { file ->
-                file.toPath().toAbsolutePath().normalize().startsWith(generated) &&
-                    file.name.startsWith('forge-') && file.name.endsWith('.jar')
-            }
-            if (forge.size() != 1) {
-                throw new GradleException("Expected one generated Forge development JAR, got: ${forge}")
-            }
-            def unsignedForge = tasks.register('ciUnsignedForge', Zip) {
-                dependsOn tasks.named('createMinecraftArtifacts')
-                from zipTree(forge[0])
-                exclude 'META-INF/*.SF', 'META-INF/*.RSA', 'META-INF/*.DSA', 'META-INF/*.EC', 'META-INF/SIG-*'
-                destinationDirectory = layout.buildDirectory.dir('ci')
-                archiveFileName = 'forge-unsigned.jar'
-            }
             task.dependsOn(unsignedForge)
-            task.toolClasspath.setFrom(original.collect {
-                it == forge[0] ? unsignedForge.flatMap { archive -> archive.archiveFile } : it
+            task.toolClasspath.setFrom(providers.provider {
+                def root = generated.toPath().toAbsolutePath().normalize()
+                def original = sourceSets.buildTool.runtimeClasspath.files
+                def forge = original.findAll { file ->
+                    file.toPath().toAbsolutePath().normalize().startsWith(root) &&
+                        file.name.startsWith('forge-') && file.name.endsWith('.jar')
+                }
+                if (forge.size() != 1) throw new GradleException("Expected one Forge classpath JAR, got: ${forge}")
+                original.collect { it == forge.first() ? unsignedForge.get().archiveFile.get().asFile : it }
             })
         }
     }
