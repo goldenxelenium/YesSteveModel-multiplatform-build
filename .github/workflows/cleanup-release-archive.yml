@@ -1,0 +1,33 @@
+name: Remove old supplementary release archive
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/cleanup-release-archive.yml]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  cleanup:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Update checksum and remove supplementary archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: dev-15c2c25f5b50-907d1c653b7e-3d7ea9405a85
+        shell: bash
+        run: |
+          gh api "repos/$GH_REPO/releases/tags/$RELEASE_TAG" > release.json
+          python3 - <<'PY'
+          import json, re
+          release = json.load(open('release.json'))
+          jars = [a for a in release['assets'] if a['name'].endswith('.jar')]
+          if len(jars) != 1 or not re.fullmatch(r'sha256:[0-9a-f]{64}', jars[0].get('digest') or ''):
+              raise ValueError('Expected one JAR with a GitHub SHA-256 digest')
+          with open('SHA256SUMS', 'w') as out:
+              out.write(jars[0]['digest'].removeprefix('sha256:') + '  ' + jars[0]['name'] + '\n')
+          PY
+          gh release upload "$RELEASE_TAG" SHA256SUMS --clobber
+          if gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name' | grep -Fxq 'ysm-linux-macos.zip'; then
+            gh release delete-asset "$RELEASE_TAG" ysm-linux-macos.zip --yes
+          fi
