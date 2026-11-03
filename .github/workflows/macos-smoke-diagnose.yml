@@ -1,0 +1,61 @@
+name: Diagnose macOS native loading
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/macos-smoke-diagnose.yml]
+  workflow_dispatch:
+    inputs:
+      package_run_id:
+        description: Package-test run containing the package-test artifact
+        required: true
+        default: '41672212917'
+        type: string
+permissions:
+  contents: read
+  actions: read
+jobs:
+  diagnose:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: xcode-27
+            target: macos-arm64
+          - runner: macos-26-intel
+            target: macos-amd64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        with:
+          name: package-test
+          path: dist
+          run-id: ${{ inputs.package_run_id || '41672212917' }}
+          github-token: ${{ github.token }}
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+        with:
+          distribution: temurin
+          java-version: '17.0.21+9'
+      - name: Test JNI and print crash report
+        env:
+          TARGET: ${{ matrix.target }}
+        shell: bash
+        run: |
+          python3 scripts/ci.py smoke || {
+            for report in hs_err_pid*.log; do
+              if [ -f "$report" ]; then
+                cat "$report"
+              fi
+            done
+            exit 1
+          }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: failure()
+        with:
+          name: crash-report-${{ matrix.target }}
+          path: hs_err_pid*.log
+          if-no-files-found: warn
+          retention-days: 7
