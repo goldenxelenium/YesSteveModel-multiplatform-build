@@ -166,11 +166,11 @@ def native():
         env['CPLUS_INCLUDE_PATH'] = str(include)
     source = ROOT / 'sources/native'
     env['CONAN_HOME'] = str(source / 'conan/cache')
-    if target.startswith('macos-') and os.environ.get('YSM_DIAGNOSTIC_SYSTEM_NEW') == '1':
+    if target.startswith('macos-'):
         allocator = source / 'modules/core/src/allocator.cc'
         if allocator.read_text().strip() != '#include <mimalloc-new-delete.h>':
-            raise RuntimeError('Allocator source changed; review diagnostic change')
-        allocator.write_text('// Diagnostic: use the system C++ new/delete operators.\n')
+            raise RuntimeError('Allocator source changed; review macOS new/delete override')
+        allocator.write_text('// macOS uses system C++ new/delete; explicit mimalloc APIs remain available.\n')
     if target.startswith('macos-'):
         mac_target = source / 'conan/cmake/targets/macos-arm64.cmake'
         template = mac_target.read_text()
@@ -340,7 +340,7 @@ def package():
         f'macOS deployment target: {config["macos_deployment_target"]}. Windows and Android are not built here.\n\n'
         'Build changes: explicit macOS runtime-loader patch; Linux Clang/GCC toolchain; '
         'Kokkos mdspan header supplement where unavailable; SVT-AV1 LTO disabled. '
-        'macOS uses Xcode Apple Clang and the system libc++ runtime. '
+        'macOS uses Xcode Apple Clang, system libc++, and system C++ new/delete. '
         'Checks: built-in model materialization, packaged sound linkage, per-platform JNI initialization. '
         'No full in-game session is run. Not an official YSM release.\n')
     with zipfile.ZipFile(dist / 'ysm-linux-macos.zip', 'w', zipfile.ZIP_DEFLATED) as zipped:
