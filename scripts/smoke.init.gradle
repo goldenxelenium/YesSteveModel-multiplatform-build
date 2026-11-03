@@ -1,5 +1,6 @@
 allprojects {
     afterEvaluate {
+        if (tasks.findByName('verifyBuiltinModelIndex') == null) return
         def generated = layout.buildDirectory.dir('moddev/artifacts').get().asFile.toPath().toAbsolutePath().normalize()
         tasks.named('verifyBuiltinModelIndex').configure { task ->
             def original = task.toolClasspath.files.toList()
