@@ -139,6 +139,9 @@ def native():
         archive = download(config['clang_url'], config['clang_sha256'], tools / 'clang.7z')
         run('7z', 'x', '-y', f'-o{tools}', archive)
         clang = tools / 'clang-23.1.4-x86_64'
+        for executable in (clang / 'bin').iterdir():
+            if executable.is_file():
+                executable.chmod(executable.stat().st_mode | 0o111)
         compiler = clang / 'bin/clang++'
         c_compiler = clang / 'bin/clang'
         env['LD_LIBRARY_PATH'] = str(clang / 'lib')
@@ -164,8 +167,14 @@ def native():
         env['CPLUS_INCLUDE_PATH'] = str(include)
     source = ROOT / 'sources/native'
     env['CONAN_HOME'] = str(source / 'conan/cache')
+    if target.startswith('macos-'):
+        mac_target = source / 'conan/cmake/targets/macos-arm64.cmake'
+        template = mac_target.read_text()
+        if template.count('-funique-source-file-names') != 1:
+            raise RuntimeError('macOS target template changed; review Apple Clang options')
+        template = template.replace('        -funique-source-file-names\n', '')
+        mac_target.write_text(template)
     if target == 'macos-amd64':
-        template = (source / 'conan/cmake/targets/macos-arm64.cmake').read_text()
         if template.count('-mcpu=apple-m1') != 1:
             raise RuntimeError('macOS target template changed; review Intel settings')
         (source / 'conan/cmake/targets/macos-x64.cmake').write_text(template.replace('-mcpu=apple-m1', '-march=x86-64'))
