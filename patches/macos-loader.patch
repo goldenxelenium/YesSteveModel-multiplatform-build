@@ -35,3 +35,62 @@
 +        return null;
 +    }
 +}
+--- a/src/main/java/com/elfmcys/ysm/client/gui/ExtraPlayerConfigScreen.java
++++ b/src/main/java/com/elfmcys/ysm/client/gui/ExtraPlayerConfigScreen.java
+@@ -50,14 +50,19 @@
+ 
+         Component name = Component.translatable("gui.yes_steve_model.hide_or_show");
+         int nameWidth = this.font.width(name) + 24;
+-        this.addRenderableWidget(new Checkbox((this.width - nameWidth) / 2, this.height + yOffset, nameWidth, 20, name,
+-            ExtraPlayerScreenConfig.DISABLE_PLAYER_RENDER.get(), true) {
++        class RenderCheckbox extends Checkbox {
++            RenderCheckbox(int x, int y, int width, int height, Component label, boolean checked, boolean showLabel) {
++                super(x, y, width, height, label, checked, showLabel);
++            }
++
+             @Override
+             public void onPress() {
+                 super.onPress();
+                 ExtraPlayerScreenConfig.DISABLE_PLAYER_RENDER.set(this.selected());
+             }
+-        });
++        }
++        this.addRenderableWidget(new RenderCheckbox((this.width - nameWidth) / 2, this.height + yOffset, nameWidth, 20,
++            name, ExtraPlayerScreenConfig.DISABLE_PLAYER_RENDER.get(), true));
+     }
+ 
+     @Override
+--- a/src/main/java/com/elfmcys/ysm/client/gui/PlayerModelScreen.java
++++ b/src/main/java/com/elfmcys/ysm/client/gui/PlayerModelScreen.java
+@@ -243,16 +243,22 @@
+                 new FlatIconButton(x + 110, y + 27, 20, 20, 0, 32, ignored -> backToParent()).setTooltips("gui.back"));
+         }
+ 
++        class ShowModelIdCheckbox extends Checkbox {
++            ShowModelIdCheckbox(int x, int y, int width, int height, Component label, boolean checked, boolean showLabel) {
++                super(x, y, width, height, label, checked, showLabel);
++            }
++
++            @Override
++            public void onPress() {
++                super.onPress();
++                ClientConfig.SHOW_MODEL_ID_FIRST.set(selected());
++                ClientConfig.SHOW_MODEL_ID_FIRST.save();
++            }
++        }
+         addRenderableWidget(
+-            new Checkbox(x + 5, y - 22, 20, 20, Component.translatable("gui.yes_steve_model.show_model_id_first"),
+-                ClientConfig.SHOW_MODEL_ID_FIRST.get(), true) {
+-                @Override
+-                public void onPress() {
+-                    super.onPress();
+-                    ClientConfig.SHOW_MODEL_ID_FIRST.set(selected());
+-                    ClientConfig.SHOW_MODEL_ID_FIRST.save();
+-                }
+-            });
++            new ShowModelIdCheckbox(x + 5, y - 22, 20, 20,
++                Component.translatable("gui.yes_steve_model.show_model_id_first"),
++                ClientConfig.SHOW_MODEL_ID_FIRST.get(), true));
+ 
+         addCategoryButton(x + 328, 32, CatalogBrowserState.Category.ALL, "gui.yes_steve_model.all_models");
+         addCategoryButton(x + 308, 48, CatalogBrowserState.Category.AUTH, "gui.yes_steve_model.auth_models");
