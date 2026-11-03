@@ -343,20 +343,7 @@ def package():
         'macOS uses Xcode Apple Clang, system libc++, and system C++ new/delete. '
         'Checks: built-in model materialization, packaged sound linkage, per-platform JNI initialization. '
         'No full in-game session is run. Not an official YSM release.\n')
-    with zipfile.ZipFile(dist / 'ysm-linux-macos.zip', 'w', zipfile.ZIP_DEFLATED) as zipped:
-        zipped.write(dist / jars[0].name, jars[0].name)
-        for target, filename in NATIVE_FILES.items():
-            zipped.write(ROOT / 'artifacts' / f'native-{target}' / filename, f'native/{target}/{filename}')
-        for filename in ('build-info.json', 'release-notes.md'):
-            zipped.write(dist / filename, filename)
-        zipped.write(ROOT / 'patches/macos-loader.patch', 'patches/macos-loader.patch')
-        zipped.write(java / 'LICENSE', 'licenses/Java-LICENSE')
-        zipped.write(java / 'NOTICE.md', 'licenses/Java-NOTICE.md')
-        for target in NATIVE_FILES:
-            folder = ROOT / 'artifacts' / f'native-{target}'
-            for notice in folder.glob('*LICENSE*'):
-                zipped.write(notice, f'licenses/{target}-{notice.name}')
-    files = [*dist.glob('*.jar'), *dist.glob('*.zip')]
+    files = [*dist.glob('*.jar')]
     (dist / 'SHA256SUMS').write_text(''.join(f'{digest(p)}  {p.name}\n' for p in sorted(files)))
 
 
