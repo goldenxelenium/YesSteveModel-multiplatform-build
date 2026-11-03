@@ -207,9 +207,9 @@ jobs:
         run: |
           if gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft > release-draft.txt; then
             test "$(cat release-draft.txt)" = true
-            gh release upload "$RELEASE_TAG" dist/*.jar dist/*.zip dist/SHA256SUMS --clobber
+            gh release upload "$RELEASE_TAG" dist/*.jar dist/SHA256SUMS --clobber
           else
-            gh release create "$RELEASE_TAG" dist/*.jar dist/*.zip dist/SHA256SUMS \
+            gh release create "$RELEASE_TAG" dist/*.jar dist/SHA256SUMS \
               --target "$BUILD_COMMIT" --draft --prerelease --latest=false \
               --title "YSM Linux amd64 + macOS arm64 + Intel ($RELEASE_TAG)" \
               --notes-file dist/release-notes.md
