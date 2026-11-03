@@ -44,6 +44,7 @@ jobs:
         env:
           TARGET: macos-arm64
           YSM_DIAGNOSTIC_SYMBOLS: '1'
+          YSM_DIAGNOSTIC_SYSTEM_NEW: '1'
           EXPECTED_JAVA_SHA: 15c2c25f5b50f54ee099bc474483dc4b588d956d
           EXPECTED_NATIVE_SHA: 907d1c653b7eb85ee92ee11305134408300797f8
         run: python3 scripts/ci.py native
