@@ -291,6 +291,12 @@ def package():
     dist.mkdir(exist_ok=True)
     env['CI_SMOKE_DIR'] = str(dist / 'smoke')
     paths = [env['JAVA_HOME_17_X64'], env['JAVA_HOME_21_X64']]
+    # Generate Minecraft mappings before resolving the verification classpath.
+    run(gradle, '--no-daemon', '--console=plain',
+        '--init-script', ROOT / 'scripts/repositories.init.gradle',
+        '--init-script', ROOT / 'scripts/smoke.init.gradle',
+        f'-Porg.gradle.java.installations.paths={",".join(paths)}',
+        'createMinecraftArtifacts', cwd=java, env=env)
     run(gradle, '--no-daemon', '--console=plain',
         '--init-script', ROOT / 'scripts/repositories.init.gradle',
         '--init-script', ROOT / 'scripts/smoke.init.gradle',
