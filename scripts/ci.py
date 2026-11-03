@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Build source-pinned native libraries, embed them, and publish verified artifacts."""
-import ctypes
 import hashlib
 import json
 import os
@@ -200,7 +199,7 @@ def native():
     if target.startswith('macos-'):
         run('codesign', '--force', '--sign', '-', library)
     inspect_library(library, target)
-    ctypes.CDLL(str(library))
+    # JNI initialization is checked by the JVM smoke job on each target.
     destination = ROOT / 'artifacts' / target
     destination.mkdir(parents=True, exist_ok=True)
     shutil.copy2(library, destination / NATIVE_FILES[target])
