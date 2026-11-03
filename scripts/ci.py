@@ -172,6 +172,11 @@ def native():
         if template.count('-funique-source-file-names') != 1:
             raise RuntimeError('macOS target template changed; review Apple Clang options')
         template = template.replace('        -funique-source-file-names\n', '')
+        if os.environ.get('YSM_DIAGNOSTIC_SYMBOLS') == '1':
+            original = '-Wl,-S,-x,-undefined,error,-dead_strip'
+            if template.count(original) != 1:
+                raise RuntimeError('macOS linker flags changed; review diagnostic symbols')
+            template = template.replace(original, '-Wl,-undefined,error,-dead_strip')
         mac_target.write_text(template)
     if target == 'macos-amd64':
         if template.count('-mcpu=apple-m1') != 1:
@@ -193,6 +198,8 @@ def native():
             '-DCMAKE_CXX_SCAN_FOR_MODULES=OFF']
     if target == 'linux-amd64':
         args.append('-DCMAKE_LINKER_TYPE=LLD')
+    if target.startswith('macos-') and os.environ.get('YSM_DIAGNOSTIC_SYMBOLS') == '1':
+        args.append('-DCMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG -g')
     run(*args, env=env)
     run('cmake', '--build', build, '--target', 'ysm-lib-jni', '-j3', env=env)
     library = build / 'modules/lib-jni' / ('libysm.dylib' if target.startswith('macos-') else NATIVE_FILES[target])
