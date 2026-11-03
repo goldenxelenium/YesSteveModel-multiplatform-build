@@ -1,0 +1,89 @@
+name: Symbolicate macOS native crash
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/macos-symbols.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  debug-arm:
+    runs-on: xcode-27
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: YesSteveModel/YesSteveModel
+          ref: 15c2c25f5b50f54ee099bc474483dc4b588d956d
+          path: sources/java
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: YesSteveModel/YesSteveModel-Native
+          ref: 907d1c653b7eb85ee92ee11305134408300797f8
+          path: sources/native
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: kokkos/mdspan
+          ref: a32a23b523953f9c4ce0efccd56b7563bf6d83db
+          path: sources/mdspan
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+      - run: |
+          brew install git
+          echo "$(brew --prefix git)/bin" >> "$GITHUB_PATH"
+          python3 -m pip install -r requirements-build.txt
+      - name: Build ARM native library with symbols
+        env:
+          TARGET: macos-arm64
+          YSM_DIAGNOSTIC_SYMBOLS: '1'
+          EXPECTED_JAVA_SHA: 15c2c25f5b50f54ee099bc474483dc4b588d956d
+          EXPECTED_NATIVE_SHA: 907d1c653b7eb85ee92ee11305134408300797f8
+        run: python3 scripts/ci.py native
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        with:
+          name: package-test
+          path: dist
+          run-id: '41672212917'
+          github-token: ${{ github.token }}
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+        with:
+          distribution: temurin
+          java-version: '17.0.21+9'
+      - name: Load and symbolicate
+        shell: bash
+        run: |
+          library="$PWD/artifacts/macos-arm64/libysm.dylib"
+          jar="$(find "$PWD/dist" -maxdepth 1 -name '*.jar' -print -quit)"
+          set +e
+          java -cp "$PWD/dist/smoke:$jar:$PWD/dist/smoke/*" NativeSmoke "$library" macos-arm64
+          status=$?
+          set -e
+          for report in hs_err_pid*.log; do
+            if [ -f "$report" ]; then
+              cat "$report"
+              offset="$(sed -nE 's/.*\[libysm\.dylib\+(0x[0-9a-fA-F]+)\].*/\1/p' "$report" | head -1)"
+              if [ -n "$offset" ]; then
+                echo "Crash location at image offset $offset:"
+                atos -o "$library" -arch arm64 "$offset" || true
+                nm -an "$library" | tail -20
+              fi
+            fi
+          done
+          exit "$status"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: macos-arm-debug
+          path: |
+            hs_err_pid*.log
+            artifacts/macos-arm64/libysm.dylib
+          if-no-files-found: warn
+          retention-days: 7
