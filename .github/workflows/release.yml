@@ -59,9 +59,9 @@ jobs:
         include:
           - runner: ubuntu-24.04
             target: linux-amd64
-          - runner: macos-15
+          - runner: xcode-27
             target: macos-arm64
-          - runner: macos-15-intel
+          - runner: macos-26-intel
             target: macos-amd64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
@@ -160,9 +160,9 @@ jobs:
         include:
           - runner: ubuntu-24.04
             target: linux-amd64
-          - runner: macos-15
+          - runner: xcode-27
             target: macos-arm64
-          - runner: macos-15-intel
+          - runner: macos-26-intel
             target: macos-amd64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 10
