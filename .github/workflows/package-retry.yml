@@ -1,0 +1,108 @@
+name: Test package from native artifacts
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/package-retry.yml
+      - patches/macos-loader.patch
+      - scripts/ci.py
+      - scripts/NativeSmoke.java
+      - scripts/smoke.init.gradle
+      - scripts/repositories.init.gradle
+  workflow_dispatch:
+    inputs:
+      native_run_id:
+        description: Workflow run containing the three native artifacts
+        required: true
+        default: '41663938349'
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        with:
+          pattern: native-*
+          path: artifacts
+          run-id: ${{ inputs.native_run_id || '41663938349' }}
+          github-token: ${{ github.token }}
+      - name: Read and validate source revisions
+        id: sources
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          data = json.loads(Path('artifacts/native-linux-amd64/metadata.json').read_text())
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              for name in ('java', 'native'):
+                  value = data[f'{name}_commit']
+                  if not re.fullmatch(r'[0-9a-f]{40}', value):
+                      raise ValueError(f'Invalid {name} commit')
+                  print(f'{name}={value}', file=out)
+          PY
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: YesSteveModel/YesSteveModel
+          ref: ${{ steps.sources.outputs.java }}
+          path: sources/java
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+        with:
+          distribution: temurin
+          java-version: |
+            17.0.21+9
+            21.0.13+9
+      - name: Package and verify
+        env:
+          EXPECTED_JAVA_SHA: ${{ steps.sources.outputs.java }}
+          EXPECTED_NATIVE_SHA: ${{ steps.sources.outputs.native }}
+          RELEASE_TAG: package-test-${{ github.run_id }}
+        run: python3 scripts/ci.py package
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: package-test
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  smoke:
+    needs: package
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: linux-amd64
+          - runner: xcode-27
+            target: macos-arm64
+          - runner: macos-26-intel
+            target: macos-amd64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        with:
+          name: package-test
+          path: dist
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+        with:
+          distribution: temurin
+          java-version: '17.0.21+9'
+      - name: Test JNI in the packaged mod
+        env:
+          TARGET: ${{ matrix.target }}
+        run: python3 scripts/ci.py smoke
