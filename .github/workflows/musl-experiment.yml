@@ -1,0 +1,69 @@
+name: Test Linux musl native build
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/musl-experiment.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  musl:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: YesSteveModel/YesSteveModel-Native
+          ref: 907d1c653b7eb85ee92ee11305134408300797f8
+          path: native
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: kokkos/mdspan
+          ref: a32a23b523953f9c4ce0efccd56b7563bf6d83db
+          path: mdspan
+          persist-credentials: false
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        with:
+          name: multiplatform-release
+          path: dist
+          run-id: '41682696420'
+          github-token: ${{ github.token }}
+      - name: Build and smoke test in Alpine Linux
+        shell: bash
+        run: |
+          docker run --rm -i -v "$PWD:/work" -w /work alpine:edge sh -eux <<'SH'
+          apk add --no-cache bash git build-base cmake ninja python3 py3-pip nasm linux-headers openjdk17-jre-headless binutils
+          python3 -m venv /tmp/ysm-venv
+          . /tmp/ysm-venv/bin/activate
+          pip install conan==2.33.0
+          git config --global --add safe.directory /work/native
+          mkdir -p /work/include
+          python3 /work/mdspan/make_single_header.py /work/mdspan/include/mdspan/mdspan.hpp > /work/include/mdspan-generated
+          printf '#include <span>\n#define MDSPAN_IMPL_STANDARD_NAMESPACE std\n' > /work/include/mdspan
+          cat /work/include/mdspan-generated >> /work/include/mdspan
+          export CPLUS_INCLUDE_PATH=/work/include
+          export CONAN_HOME=/work/native/conan/cache
+          cd /work/native
+          bash bootstrap.sh setup
+          conan profile detect --force
+          conan install . -pr:h default -pr:h conan/profile-override -pr:b default --no-remote --build=missing -s build_type=Release -c:h user.target:profile=native -c tools.build:jobs=3 -c "tools.cmake.cmaketoolchain:extra_variables={'CMAKE_CXX_SCAN_FOR_MODULES': False}" -c "svt-av1/*:tools.cmake.cmaketoolchain:extra_variables={'SVT_AV1_LTO': False, 'CMAKE_CXX_SCAN_FOR_MODULES': False}" --core-conf core.graph:compatibility_mode=optimized
+          cmake -S . -B build/ci-musl -G Ninja -DCMAKE_TOOLCHAIN_FILE=/work/native/build/native-release/generators/conan_toolchain.cmake -DCMAKE_BUILD_TYPE=Release -DYSM_DEPENDENCY_PROVIDER=conan -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+          cmake --build build/ci-musl --target ysm-lib-jni -j3
+          library=/work/native/build/ci-musl/modules/lib-jni/libysm.so
+          readelf -d "$library"
+          if readelf --version-info "$library" | grep -q 'GLIBC_'; then
+            echo 'Unexpected glibc symbol requirement' >&2
+            exit 1
+          fi
+          jar="$(find /work/dist -maxdepth 1 -name '*.jar' -print -quit)"
+          test -n "$jar"
+          java -cp "/work/dist/smoke:$jar:/work/dist/smoke/*" NativeSmoke "$library" linux-amd64
+          SH
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: experimental-linux-musl-amd64
+          path: native/build/ci-musl/modules/lib-jni/libysm.so
+          if-no-files-found: error
+          retention-days: 7
