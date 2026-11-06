@@ -52,7 +52,7 @@ jobs:
           export CPLUS_INCLUDE_PATH=/work/include
           export CC=clang-19 CXX=clang++-19
           export CXXFLAGS=-stdlib=libc++
-          export LDFLAGS='-stdlib=libc++ -lc++abi'
+          export LDFLAGS='-stdlib=libc++ -Wl,-Bstatic -lc++abi -lunwind -Wl,-Bdynamic'
           export CONAN_HOME=/work/native/conan/cache
           cd /work/native
           sed -i '/-funique-source-file-names/d' conan/cmake/targets/linux-x64.cmake
@@ -64,6 +64,11 @@ jobs:
           cmake --build build/ci-debian12 --target ysm-lib-jni -j3
           library=/work/native/build/ci-debian12/modules/lib-jni/libysm.so
           readelf -d "$library"
+          unexpected="$(readelf -d "$library" | sed -n 's/.*Shared library: \[\(.*\)\].*/\1/p' | grep -Ev '^(libc\.so\.6|libm\.so\.6|ld-linux-x86-64\.so\.2|libpthread\.so\.0|libdl\.so\.2|librt\.so\.1)$' || true)"
+          if [ -n "$unexpected" ]; then
+            echo "Unexpected dynamic dependencies: $unexpected" >&2
+            exit 1
+          fi
           readelf --version-info "$library" | grep -o 'GLIBC_[0-9.]*' | sort -Vu
           if readelf --version-info "$library" | grep -o 'GLIBC_[0-9.]*' | sort -Vu | tail -1 | grep -Ev '^GLIBC_2\.([0-9]|[12][0-9]|3[0-6])$'; then
             echo 'glibc requirement exceeds 2.36' >&2
