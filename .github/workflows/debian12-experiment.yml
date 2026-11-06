@@ -55,6 +55,7 @@ jobs:
           export LDFLAGS='-stdlib=libc++ -lc++abi'
           export CONAN_HOME=/work/native/conan/cache
           cd /work/native
+          sed -i '/-funique-source-file-names/d' conan/cmake/targets/linux-x64.cmake
           bash bootstrap.sh setup
           conan profile detect --force
           sed -i 's/compiler.libcxx=libstdc++11/compiler.libcxx=libc++/' "$CONAN_HOME/profiles/default"
