@@ -1,0 +1,96 @@
+name: Package Debian 12 compatible JAR
+on:
+  workflow_run:
+    workflows: [Test Debian 12 native build]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      native_run_id:
+        description: Successful Debian 12 native build run ID
+        required: true
+        type: string
+permissions:
+  actions: read
+  contents: read
+jobs:
+  package:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        with:
+          name: multiplatform-release
+          path: original
+          run-id: '41682696420'
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        with:
+          name: experimental-linux-glibc236-amd64
+          path: native
+          run-id: ${{ inputs.native_run_id || github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+      - name: Embed the Debian 12 native library
+        env:
+          NATIVE_RUN_ID: ${{ inputs.native_run_id || github.event.workflow_run.id }}
+        shell: bash
+        run: |
+          mkdir -p output extracted
+          python3 - <<'PY'
+          import hashlib, json, os, re, subprocess, zipfile
+          from pathlib import Path
+          original, = Path('original').glob('*.jar')
+          library = Path('native/libysm.so').read_bytes()
+          versions = re.findall(r'GLIBC_(\d+(?:\.\d+)+)', subprocess.check_output(
+              ['readelf', '--version-info', 'native/libysm.so'], text=True))
+          if not versions:
+              raise RuntimeError('Native library has no glibc version information')
+          minimum = max(versions, key=lambda v: tuple(map(int, v.split('.'))))
+          if tuple(map(int, minimum.split('.'))) > (2, 36):
+              raise RuntimeError(f'glibc requirement exceeds 2.36: {minimum}')
+          native_name = 'META-INF/native/libysm.so'
+          metadata_name = 'META-INF/ysm-community-build.json'
+          out = Path('output') / original.name
+          with zipfile.ZipFile(original) as src:
+              names = src.namelist()
+              if len(names) != len(set(names)):
+                  raise RuntimeError('Original JAR contains duplicate entries')
+              if any(re.fullmatch(r'META-INF/[^/]+\.(SF|RSA|DSA|EC)', n, re.I) for n in names):
+                  raise RuntimeError('Cannot modify a signed JAR')
+              info = json.loads(src.read(metadata_name))
+              meta = info['platforms']['linux-amd64']
+              if meta['java_commit'] != '15c2c25f5b50f54ee099bc474483dc4b588d956d' or meta['native_commit'] != '907d1c653b7eb85ee92ee11305134408300797f8':
+                  raise RuntimeError('Original JAR does not match the Debian native sources')
+              if hashlib.sha256(src.read(native_name)).hexdigest() != meta['sha256']:
+                  raise RuntimeError('Original embedded Linux library does not match metadata')
+              meta.update(sha256=hashlib.sha256(library).hexdigest(), minimum_glibc=minimum,
+                          compiler='Debian 12 clang 19 / libc++', dependency_compiler='Debian 12 clang 19 / libc++',
+                          mdspan_supplement=True, native_build_run=os.environ['NATIVE_RUN_ID'])
+              with zipfile.ZipFile(out, 'w') as dst:
+                  for item in src.infolist():
+                      data = library if item.filename == native_name else (
+                          (json.dumps(info, indent=2) + '\n').encode() if item.filename == metadata_name else src.read(item))
+                      dst.writestr(item, data)
+          with zipfile.ZipFile(out) as check:
+              if check.testzip() or check.read(native_name) != library:
+                  raise RuntimeError('Packaged native library failed integrity check')
+              Path('extracted/libysm.so').write_bytes(check.read(native_name))
+          Path('output/SHA256SUMS').write_text(hashlib.sha256(out.read_bytes()).hexdigest() + '  ' + out.name + '\n')
+          print('Packaged Linux library requires glibc', minimum)
+          PY
+      - name: Test packaged JNI on Debian 12
+        shell: bash
+        run: |
+          jar="$(find "$PWD/output" -maxdepth 1 -name '*.jar' -print -quit)"
+          docker run --rm -i -v "$PWD:/work" -w /work debian:12-slim bash -eux <<'SH'
+          apt-get update
+          apt-get install -y --no-install-recommends openjdk-17-jre-headless ca-certificates
+          jar="$(find /work/output -maxdepth 1 -name '*.jar' -print -quit)"
+          java -cp "/work/original/smoke:$jar:/work/original/smoke/*" NativeSmoke /work/extracted/libysm.so linux-amd64
+          SH
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ysm-debian12-compatible
+          path: output/
+          if-no-files-found: error
+          retention-days: 30
